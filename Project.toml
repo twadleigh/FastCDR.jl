@@ -1,0 +1,7 @@
+name = "FastCDR"
+uuid = "d2e384d8-c3cb-4c6d-8186-71eb9098a80a"
+authors = ["Tracy Wadleigh <tracy.wadleigh@gmail.com>"]
+version = "0.1.0"
+
+[deps]
+FastCDR_jll = "4c445503-5c2d-5ebd-97f6-9e823778a91e"

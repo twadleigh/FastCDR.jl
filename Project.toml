@@ -4,4 +4,4 @@ authors = ["Tracy Wadleigh <tracy.wadleigh@gmail.com>"]
 version = "0.1.0"
 
 [deps]
-FastCDR_jll = "4c445503-5c2d-5ebd-97f6-9e823778a91e"
+cfastcdr_jll = "e2b848fe-1ff7-5e39-bbba-9dad9f402efb"

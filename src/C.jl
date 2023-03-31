@@ -2,9 +2,9 @@ module C
 
 export CdrType, DDSCdrPlFlag, Endianness, DEFAULT_ENDIANNESS
 
-using FastCDR_jll
+using cfastcdr_jll
 using Core.Intrinsics: cglobal
-const lib = FastCDR_jll.libcfastcdr_1
+const lib = cfastcdr_jll.libcfastcdr_1
 
 const CORBA_CDR_ = unsafe_load(cglobal((:corba_cdr, lib), UInt8))
 const DDS_CDR_ = unsafe_load(cglobal((:dds_cdr, lib), UInt8))
@@ -13,16 +13,35 @@ const DDS_CDR_WITH_PL_ = unsafe_load(cglobal((:dds_cdr_with_pl, lib), UInt8))
 const BIG_ENDIANNESS_ = unsafe_load(cglobal((:big_endianness, lib), UInt8))
 const LITTLE_ENDIANNESS_ = unsafe_load(cglobal((:little_endianness, lib), UInt8))
 const DEFAULT_ENDIANNESS_ = unsafe_load(cglobal((:default_endianness, lib), UInt8))
+const EXN_SUCCESS_ = unsafe_load(cglobal((:exn_success, lib), UInt8))
+const EXN_NOT_ENOUGH_MEMORY_ = unsafe_load(cglobal((:exn_not_enough_memory, lib), UInt8))
+const EXN_BAD_PARAM_ = unsafe_load(cglobal((:exn_bad_param, lib), UInt8))
+const EXN_UNKNOWN_ = unsafe_load(cglobal((:exn_unknown, lib), UInt8))
 
 @enum CdrType CORBA_CDR=CORBA_CDR_ DDS_CDR=DDS_CDR_
 @enum DDSCdrPlFlag DDS_CDR_WITHOUT_PL=DDS_CDR_WITHOUT_PL_ DDS_CDR_WITH_PL=DDS_CDR_WITH_PL_
 @enum Endianness BIG_ENDIANNESS=BIG_ENDIANNESS_ LITTLE_ENDIANNESS=LITTLE_ENDIANNESS_
 const DEFAULT_ENDIANNESS = Endianness(DEFAULT_ENDIANNESS_)
+@enum ExnType EXN_SUCCESS=EXN_SUCCESS_ EXN_NOT_ENOUGH_MEMORY=EXN_NOT_ENOUGH_MEMORY_ EXN_BAD_PARAM=EXN_BAD_PARAM_ EXN_UNKNOWN=EXN_UNKNOWN_
 
-fb_make(ptr, sz) = @ccall lib.fast_buffer_make(ptr::Ptr{Cchar}, sz::Csize_t)::Ptr{Nothing}
+exn_type(ptr) = ExnType(@ccall lib.exn_type(ptr::Ptr{Nothing})::UInt8)
+exn_message(ptr) = @ccall lib.exn_message(ptr::Ptr{Nothing})::Cstring
+exn_destroy(ptr) = @ccall lib.exn_destroy(ptr::Ptr{Nothing})::Nothing
+
+function exn(ptr)
+  typ = exn_type(ptr)
+  if typ != EXN_SUCCESS
+    msg = "$(typ): $(exn_message(ptr))"
+    exn_destroy(ptr)
+    error(msg) 
+  end
+  nothing
+end
+
 fb_make() = @ccall lib.fast_buffer_make0()::Ptr{Nothing}
-fb_destroy(ptr) = @ccall lib.fast_buffer_destroy(ptr::Ptr{Nothing})::Nothing
+fb_make(ptr, sz) = @ccall lib.fast_buffer_make(ptr::Ptr{Cchar}, sz::Csize_t)::Ptr{Nothing}
 
+fb_destroy(ptr) = @ccall lib.fast_buffer_destroy(ptr::Ptr{Nothing})::Nothing
 fb_buffer(ptr) = @ccall lib.fast_buffer_get_buffer(ptr::Ptr{Nothing})::Ptr{Cchar}
 fb_buffer_size(ptr) = @ccall lib.fast_buffer_get_buffer_size(ptr::Ptr{Nothing})::Csize_t
 fb_reserve(ptr, sz) = @ccall lib.fast_buffer_reserve(ptr::Ptr{Nothing}, sz::Csize_t)::Bool
@@ -30,9 +49,8 @@ fb_resize(ptr, sz) = @ccall lib.fast_buffer_resize(ptr::Ptr{Nothing}, sz::Csize_
 
 cdr_make(ptr, e::Endianness, t::CdrType) = @ccall lib.cdr_make(ptr::Ptr{Nothing}, e::UInt8, t::UInt8)::Ptr{Nothing}
 cdr_destroy(ptr) = @ccall lib.cdr_destroy(ptr::Ptr{Nothing})::Nothing
-cdr_get_last_exception_message(ptr) = @ccall lib.cdr_get_last_exception_message(ptr::Ptr{Nothing})::Cstring
-cdr_read_encapsultation(ptr) = @ccall lib.cdr_read_encapsulation(ptr::Ptr{Nothing})::Bool
-cdr_serialize_encapsulation(ptr) = @ccall lib.cdr_serialize_encapsulation(ptr::Ptr{Nothing})::Bool
+cdr_read_encapsultation(ptr) = exn(@ccall lib.cdr_read_encapsulation_exn(ptr::Ptr{Nothing})::Ptr{Nothing})
+cdr_serialize_encapsulation(ptr) = exn(@ccall lib.cdr_serialize_encapsulation_exn(ptr::Ptr{Nothing})::Ptr{Nothing})
 cdr_get_dds_cdr_pl_flag(ptr) = DDSCdrPlFlag(@ccall lib.cdr_get_dds_cdr_pl_flag(ptr::Ptr{Nothing})::UInt8)
 cdr_set_dds_cdr_pl_flag(ptr, f::DDSCdrPlFlag) = @ccall lib.cdr_set_dds_cdr_pl_flag(ptr::Ptr{Nothing}, f::UInt8)::Nothing
 cdr_get_dds_cdr_options(ptr) = @ccall lib.cdr_get_dds_cdr_options(ptr::Ptr{Nothing})::UInt16
@@ -65,35 +83,35 @@ for (nm, typ) in (
 )
   @eval begin
     function cdr_serialize(ptr, d::$(typ))
-      @ccall lib.$(Symbol("cdr_serialize_" * nm))(ptr::Ptr{Nothing}, d::$(typ))::Bool
+      exn(@ccall lib.$(Symbol("cdr_serialize_" * nm * "_exn"))(ptr::Ptr{Nothing}, d::$(Ref{typ}))::Ptr{Nothing})
     end
 
     function cdr_serialize(ptr, d::$(typ), e::Endianness)
-      @ccall lib.$(Symbol("cdr_serialize_with_endianness_" * nm))(ptr::Ptr{Nothing}, d::$(typ), e::UInt8)::Bool
+      exn(@ccall lib.$(Symbol("cdr_serialize_with_endianness_" * nm * "_exn"))(ptr::Ptr{Nothing}, d::$(Ref{typ}), e::UInt8)::Ptr{Nothing})
     end
 
     function cdr_serialize_array(ptr, d::$(Ptr{typ}), sz::Integer)
-      @ccall lib.$(Symbol("cdr_serialize_array_" * nm))(ptr::Ptr{Nothing}, d::$(Ptr{typ}), sz::Csize_t)::Bool
+      exn(@ccall lib.$(Symbol("cdr_serialize_array_" * nm * "_exn"))(ptr::Ptr{Nothing}, d::$(Ptr{typ}), sz::Csize_t)::Ptr{Nothing})
     end
 
     function cdr_serialize_array(ptr, d::$(Ptr{typ}), sz::Integer, e::Endianness)
-      @ccall lib.$(Symbol("cdr_serialize_array_with_endianness_" * nm))(ptr::Ptr{Nothing}, d::$(Ptr{typ}), sz::Csize_t, e::UInt8)::Bool
+      exn(@ccall lib.$(Symbol("cdr_serialize_array_with_endianness_" * nm * "_exn"))(ptr::Ptr{Nothing}, d::$(Ptr{typ}), sz::Csize_t, e::UInt8)::Ptr{Nothing})
     end
 
     function cdr_deserialize(ptr, d::$(Ref{typ}))
-      @ccall lib.$(Symbol("cdr_deserialize_" * nm))(ptr::Ptr{Nothing}, d::$(Ref{typ}))::Bool
+      exn(@ccall lib.$(Symbol("cdr_deserialize_" * nm *"_exn"))(ptr::Ptr{Nothing}, d::$(Ref{typ}))::Ptr{Nothing})
     end
 
     function cdr_deserialize(ptr, d::$(Ref{typ}), e::Endianness)
-      @ccall lib.$(Symbol("cdr_deserialize_with_endianness_" * nm))(ptr::Ptr{Nothing}, d::$(Ref{typ}), e::UInt8)::Bool
+      exn(@ccall lib.$(Symbol("cdr_deserialize_with_endianness_" * nm * "_exn"))(ptr::Ptr{Nothing}, d::$(Ref{typ}), e::UInt8)::Ptr{Nothing})
     end
 
     function cdr_deserialize_array(ptr, d::$(Ref{Ptr{typ}}), sz::Integer)
-      @ccall lib.$(Symbol("cdr_deserialize_array_" * nm))(ptr::Ptr{Nothing}, d::$(Ref{Ptr{typ}}), sz::Csize_t)::Bool
+      exn(@ccall lib.$(Symbol("cdr_deserialize_array_" * nm * "_exn"))(ptr::Ptr{Nothing}, d::$(Ref{Ptr{typ}}), sz::Csize_t)::Ptr{Nothing})
     end
 
     function cdr_deserialize_array(ptr, d::$(Ref{Ptr{typ}}), sz::Integer, e::Endianness)
-      @ccall lib.$(Symbol("cdr_deserialize_array_with_endianness_" * nm))(ptr::Ptr{Nothing}, d::$(Ref{Ptr{typ}}), sz::Csize_t, e::UInt8)::Bool
+      exn(@ccall lib.$(Symbol("cdr_deserialize_array_with_endianness_" * nm * "_exn"))(ptr::Ptr{Nothing}, d::$(Ref{Ptr{typ}}), sz::Csize_t, e::UInt8)::Ptr{Nothing})
     end
   end
 end
@@ -104,19 +122,11 @@ for (nm, typ) in (
 )
   @eval begin
     function cdr_serialize(ptr, d::$(typ))
-      @ccall lib.$(Symbol("cdr_serialize_" * nm))(ptr::Ptr{Nothing}, d::$(typ))::Bool
+      exn(@ccall lib.$(Symbol("cdr_serialize_" * nm * "_exn"))(ptr::Ptr{Nothing}, d::$(typ))::Ptr{Nothing})
     end
 
     function cdr_serialize(ptr, d::$(typ), e::Endianness)
-      @ccall lib.$(Symbol("cdr_serialize_with_endianness_" * nm))(ptr::Ptr{Nothing}, d::$(typ), e::UInt8)::Bool
-    end
-
-    function cdr_deserialize(ptr, d::$(Ref{typ}))
-      @ccall lib.$(Symbol("cdr_deserialize_" * nm))(ptr::Ptr{Nothing}, d::$(Ref{typ}))::Bool
-    end
-
-    function cdr_deserialize(ptr, d::$(Ref{typ}), e::Endianness)
-      @ccall lib.$(Symbol("cdr_deserialize_with_endianness_" * nm))(ptr::Ptr{Nothing}, d::$(Ref{typ}), e::UInt8)::Bool
+      exn(@ccall lib.$(Symbol("cdr_serialize_with_endianness_" * nm * "_exn"))(ptr::Ptr{Nothing}, d::$(typ), e::UInt8)::Ptr{Nothing})
     end
   end
 end
